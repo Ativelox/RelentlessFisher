@@ -1,1 +1,2 @@
 # RelentlessFisher
+RelentlessFisher is an application to automate the fishing minigame designed by [LobosJr](https://www.twitch.tv/lobosjr). Essentially the minigame works by whispering to a bot on [twitch.tv](https://www.twitch.tv) following a simple procedure. This application therefore also incorporates an IRC client in order to connect to twitchs' chat service. More regarding that matter can be found [here](https://dev.twitch.tv/docs/irc/guide/).
