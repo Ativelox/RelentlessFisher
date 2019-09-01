@@ -21,6 +21,15 @@ public interface IIRCController {
     boolean connect(final String token);
 
     /**
+     * Disconnects this controller from the client's specified <tt>(host, port)</tt>
+     * pair.
+     * 
+     * @return <tt>True</tt> if the disconnection was successful, <tt>false</tt>
+     *         otherwise.
+     */
+    boolean disconnect();
+
+    /**
      * The JOIN command is used by client to start listening a specific channel.
      * Whether or not a client is allowed to join a channel is checked only by the
      * server the client is connected to; all other servers automatically add the

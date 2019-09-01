@@ -161,4 +161,18 @@ public class UnsecuredTwitchIRCController extends AIRCController {
 
     }
 
+    @Override
+    public boolean disconnect() {
+	try {
+	    mSocket.close();
+	    mReader.close();
+	    mWriter.close();
+
+	} catch (final IOException e) {
+	    mLogger.log(ELogType.WARNING, "Couldn't properly disconnect.");
+	    return false;
+
+	}
+	return true;
+    }
 }

@@ -23,7 +23,8 @@ public class LoggerFactory {
      */
     public static ILogger Get() {
 	if (INSTANCE == null) {
-	    INSTANCE = new ConsoleLogger();
+	    INSTANCE = new TimestampedConsoleLogger();
+	    
 	}
 	return INSTANCE;
 

@@ -3,6 +3,7 @@ package de.ativelox.relentlessfisher.irc.twitch;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 import de.ativelox.relentlessfisher.irc.AClient;
 import de.ativelox.relentlessfisher.irc.IIRCController;
@@ -11,6 +12,9 @@ import de.ativelox.relentlessfisher.listeners.IJoinListener;
 import de.ativelox.relentlessfisher.listeners.IWhisperListener;
 import de.ativelox.relentlessfisher.logging.ELogType;
 import de.ativelox.relentlessfisher.protocols.TwitchProtocolConfirmation;
+import de.ativelox.relentlessfisher.timer.ITimeoutListener;
+import de.ativelox.relentlessfisher.timer.ITimer;
+import de.ativelox.relentlessfisher.timer.SimpleTimer;
 import de.ativelox.relentlessfisher.utils.HTTPRequest;
 
 /**
@@ -25,7 +29,7 @@ import de.ativelox.relentlessfisher.utils.HTTPRequest;
  * @see {@link IPartListener}
  * @see {@link IWhisperListener}
  */
-public class TwitchClient extends AClient {
+public class TwitchClient extends AClient implements ITimeoutListener {
 
     /**
      * The key that is given in a JSON object referring to the access token for the
@@ -63,6 +67,27 @@ public class TwitchClient extends AClient {
     private final List<IWhisperListener> mWhisperListeners;
 
     /**
+     * The timer used to determine when to reconnect this client.
+     */
+    private final ITimer mReconnectTimer;
+
+    /**
+     * The time in ms after which to reconnect this client, afer no heartbeats have
+     * been received.
+     */
+    private static final long RECONNECT_TIME_OUT = 360000;
+
+    /**
+     * The accuracy of the timer in ms.
+     */
+    private static final long TIMER_ACCURACY = 30000;
+
+    /**
+     * The executor used for threading.
+     */
+    private final ExecutorService mExecutor;
+
+    /**
      * Creates a new {@link TwitchClient}.
      * 
      * @param clientId     The ID used to uniquely identify this application.
@@ -74,9 +99,10 @@ public class TwitchClient extends AClient {
      *                     an oauth token.
      * @param user         The user which granted authorization to be controlled by
      *                     this application.
+     * @param executor     the executor used for threading.
      */
-    public TwitchClient(final String clientId, final String clientSecret, final String refreshToken,
-	    final String user) {
+    public TwitchClient(final String clientId, final String clientSecret, final String refreshToken, final String user,
+	    final ExecutorService executor) {
 	super(new UnsecuredTwitchIRCController(user));
 
 	mUser = user;
@@ -86,6 +112,42 @@ public class TwitchClient extends AClient {
 	mClientSecret = clientSecret;
 
 	mWhisperListeners = new ArrayList<>();
+
+	mReconnectTimer = new SimpleTimer(RECONNECT_TIME_OUT, TIMER_ACCURACY, this);
+	mExecutor = executor;
+    }
+
+    /**
+     * Connects this client by calling {@link IIRCController#connect(String)}. Also
+     * starts some timing related tasks.
+     */
+    private void connect() {
+	mExecutor.submit(mReconnectTimer);
+
+	String access_token = null;
+	try {
+	    mLogger.log(ELogType.INFO, "Fetching access token...");
+	    access_token = this.getAccessToken();
+	    mLogger.log(ELogType.INFO, "Done.");
+
+	} catch (final IOException e1) {
+	    mLogger.log(ELogType.DANGER, "Could not get an access token.");
+	    return;
+
+	}
+	int reconnectTries = 0;
+
+	// exponential reconnect increase, as to not over-strain the server.
+	while (!mController.connect(access_token)) {
+	    try {
+		Thread.sleep(1000 * (int) Math.pow(2, reconnectTries));
+	    } catch (InterruptedException e) {
+		mLogger.log(ELogType.WARNING, "Client got interrupted while sleeping.");
+	    }
+	    reconnectTries++;
+	}
+	reconnectTries = 0;
+
     }
 
     /**
@@ -124,6 +186,11 @@ public class TwitchClient extends AClient {
     @Override
     public void onServerMessageReceived(final String serverMessage) {
 	super.onServerMessageReceived(serverMessage);
+
+	if (serverMessage.contains("PING")) {
+	    mReconnectTimer.reset();
+
+	}
 
 	if (TwitchProtocolConfirmation.IsConnect(mUser, serverMessage)) {
 	    mLogger.log(ELogType.INFO, "Got successful connection confirmation.");
@@ -175,30 +242,7 @@ public class TwitchClient extends AClient {
      */
     @Override
     public void run() {
-	String access_token = null;
-	try {
-	    mLogger.log(ELogType.INFO, "Fetching access token...");
-	    access_token = this.getAccessToken();
-	    mLogger.log(ELogType.INFO, "Done.");
-
-	} catch (final IOException e1) {
-	    mLogger.log(ELogType.DANGER, "Could not get an access token.");
-	    return;
-
-	}
-
-	int reconnectTries = 0;
-
-	// exponential reconnect increase, as to not over-strain the server.
-	while (!mController.connect(access_token)) {
-	    try {
-		Thread.sleep(1000 * (int) Math.pow(2, reconnectTries));
-	    } catch (InterruptedException e) {
-		mLogger.log(ELogType.WARNING, "Client got interrupted while sleeping.");
-	    }
-	    reconnectTries++;
-	}
-	reconnectTries = 0;
+	this.connect();
 
 	while (true) {
 	    mController.read();
@@ -225,5 +269,12 @@ public class TwitchClient extends AClient {
      */
     public void whisper(final String channel, final String receiver, final String contents) {
 	mController.PRIVMSG(channel, "/w " + receiver + " " + contents);
+    }
+
+    @Override
+    public void onTimeout(final long ms) {
+	this.mController.disconnect();
+	this.connect();
+
     }
 }
